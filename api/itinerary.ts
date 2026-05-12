@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import OpenAI from 'openai'
-import type { Destination, ItineraryParams } from '../src/types/index.js'
+import type { Destination, ItineraryParams } from '../src/types/index'
 
 const client = new OpenAI({
   apiKey: process.env.QWEN_API_KEY,
