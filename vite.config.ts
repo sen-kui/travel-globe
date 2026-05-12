@@ -110,10 +110,7 @@ export default defineConfig({
               return
             }
 
-            res.setHeader('Content-Type', 'text/event-stream; charset=utf-8')
-            res.setHeader('Cache-Control', 'no-cache, no-transform')
-            res.setHeader('X-Accel-Buffering', 'no')
-            res.setHeader('Connection', 'keep-alive')
+            res.setHeader('Content-Type', 'application/json; charset=utf-8')
             res.setHeader('Access-Control-Allow-Origin', '*')
 
             try {
@@ -129,7 +126,7 @@ export default defineConfig({
               const model = localEnv.QWEN_MODEL || 'qwen-plus'
               const prompt = buildPrompt(destination, params)
 
-              const stream = await client.chat.completions.create({
+              const completion = await client.chat.completions.create({
                 model,
                 messages: [
                   {
@@ -139,30 +136,52 @@ export default defineConfig({
                   },
                   { role: 'user', content: prompt },
                 ],
-                stream: true,
+                stream: false,
                 max_tokens: 8192,
                 temperature: 0.9,
               })
 
-              for await (const chunk of stream) {
-                const delta = chunk.choices[0]?.delta as {
-                  content?: string | null
-                  reasoning_content?: string | null
+              const message = completion.choices[0]?.message as {
+                content?: string | null
+                reasoning_content?: string | null
+              }
+              const fullText = message?.content || message?.reasoning_content || ''
+
+              // 提取 JSON：先找 ```json 代码块，再找最后一个完整 {}
+              let jsonStr: string | null = null
+              const codeBlock = fullText.match(/```json\s*([\s\S]*?)```/)
+              if (codeBlock) {
+                jsonStr = codeBlock[1].trim()
+              } else {
+                const candidates: string[] = []
+                let depth = 0
+                let start = -1
+                for (let i = 0; i < fullText.length; i++) {
+                  if (fullText[i] === '{') {
+                    if (depth === 0) start = i
+                    depth++
+                  } else if (fullText[i] === '}') {
+                    depth--
+                    if (depth === 0 && start >= 0) candidates.push(fullText.slice(start, i + 1))
+                  }
                 }
-                // kimi-k2.6 等推理模型把输出放在 reasoning_content，普通模型放 content
-                const text = delta?.content || delta?.reasoning_content || ''
-                if (text) {
-                  res.write(`data: ${JSON.stringify({ content: text })}\n\n`)
-                }
+                jsonStr = candidates[candidates.length - 1] ?? null
               }
 
-              res.write('data: [DONE]\n\n')
-              res.end()
+              if (!jsonStr) {
+                res.statusCode = 500
+                res.end(JSON.stringify({ error: '未能从模型输出中提取行程数据' }))
+                return
+              }
+
+              const itinerary = JSON.parse(jsonStr)
+              res.statusCode = 200
+              res.end(JSON.stringify({ itinerary }))
             } catch (err) {
               const message = err instanceof Error ? err.message : 'Server error'
               console.error('[API] itinerary error:', message)
-              res.write(`data: ${JSON.stringify({ error: message })}\n\n`)
-              res.end()
+              res.statusCode = 500
+              res.end(JSON.stringify({ error: message }))
             }
           },
         )

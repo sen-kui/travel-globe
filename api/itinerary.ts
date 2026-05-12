@@ -25,26 +25,25 @@ function buildPrompt(dest: Destination, params: ItineraryParams): string {
 预算档位：${params.budget}
 货币：${dest.currency}
 时区：${dest.timezone}
-
 签证情况：${dest.visa.join('、')}
 最佳季节：${dest.bestSeason.join('、')}
 
 请以 JSON 格式返回，结构如下（仅返回 JSON，不要有其他文字）：
 {
-  "title": "行程标题（带创意感，例如：「${dest.nameCN}${params.days}日深度游」）",
+  "title": "行程标题（带创意感）",
   "summary": "一段行程总体描述（2-3句话，突出旅行亮点）",
   "days": [
     {
       "day": 1,
-      "theme": "当天主题（简短，如：「古城探秘」）",
+      "theme": "当天主题（简短）",
       "activities": [
         {
           "time": "上午 9:00",
           "name": "活动名称",
           "category": "景点",
           "desc": "简短描述（1-2句话）",
-          "tips": "实用小贴士（如票价、最佳拍照位置、注意事项等）",
-          "mapQuery": "适合在地图搜索的关键词（英文+中文）"
+          "tips": "实用小贴士（票价/时间/注意事项）",
+          "mapQuery": "适合在地图搜索的关键词"
         }
       ]
     }
@@ -53,15 +52,39 @@ function buildPrompt(dest: Destination, params: ItineraryParams): string {
   "bestTime": "最佳游览时间提示（结合季节和当地气候）"
 }
 
-要求：
-- 每天安排 3-4 个活动，合理分配上午/下午/晚上时段
-- 活动包含景点、美食、交通、购物等多种类型
-- tips 要具体实用（价格/时间/注意事项）
-- 行程紧凑但不过于赶，符合实际节奏
-- 内容完全使用中文`
+要求：每天安排 3-4 个活动，合理分配上午/下午/晚上时段，内容完全使用中文。`
+}
+
+function extractJson(text: string): string | null {
+  // 1. 找 ```json 代码块（推理模型常用）
+  const codeBlock = text.match(/```json\s*([\s\S]*?)```/)
+  if (codeBlock) return codeBlock[1].trim()
+
+  // 2. 遍历找最后一个完整 JSON 对象
+  const candidates: string[] = []
+  let depth = 0
+  let start = -1
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === '{') {
+      if (depth === 0) start = i
+      depth++
+    } else if (text[i] === '}') {
+      depth--
+      if (depth === 0 && start >= 0) candidates.push(text.slice(start, i + 1))
+    }
+  }
+  return candidates[candidates.length - 1] ?? null
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  res.setHeader('Access-Control-Allow-Origin', '*')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+
+  if (req.method === 'OPTIONS') {
+    res.status(204).end()
+    return
+  }
+
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed' })
     return
@@ -77,46 +100,43 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return
   }
 
-  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8')
-  res.setHeader('Cache-Control', 'no-cache, no-transform')
-  res.setHeader('X-Accel-Buffering', 'no')
-  res.setHeader('Connection', 'keep-alive')
-  res.setHeader('Access-Control-Allow-Origin', '*')
-
   try {
     const prompt = buildPrompt(destination, params)
 
-    const stream = await client.chat.completions.create({
+    // 非流式调用——等待模型完整输出后一次性返回
+    const completion = await client.chat.completions.create({
       model: MODEL,
       messages: [
         {
           role: 'system',
-          content: '你是一位专业旅行规划师，擅长为中国游客制定海外旅行方案。请严格按照用户要求的 JSON 格式输出，不要输出任何额外文字。',
+          content: '你是一位专业旅行规划师，请严格按照用户要求的 JSON 格式输出，不要输出任何额外文字。',
         },
         { role: 'user', content: prompt },
       ],
-      stream: true,
+      stream: false,
       max_tokens: 8192,
       temperature: 0.9,
     })
 
-    for await (const chunk of stream) {
-      const delta = chunk.choices[0]?.delta as {
-        content?: string | null
-        reasoning_content?: string | null
-      }
-      // kimi-k2.6 等推理模型把输出放在 reasoning_content，普通模型放 content
-      const text = delta?.content || delta?.reasoning_content || ''
-      if (text) {
-        res.write(`data: ${JSON.stringify({ content: text })}\n\n`)
-      }
+    const message = completion.choices[0]?.message as {
+      content?: string | null
+      reasoning_content?: string | null
     }
 
-    res.write('data: [DONE]\n\n')
-    res.end()
+    // kimi-k2.6 输出在 reasoning_content，普通模型在 content
+    const fullText = message?.content || message?.reasoning_content || ''
+
+    const jsonStr = extractJson(fullText)
+    if (!jsonStr) {
+      res.status(500).json({ error: '未能从模型输出中提取行程数据' })
+      return
+    }
+
+    const itinerary = JSON.parse(jsonStr)
+    res.status(200).json({ itinerary })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Internal server error'
-    res.write(`data: ${JSON.stringify({ error: message })}\n\n`)
-    res.end()
+    console.error('[itinerary]', message)
+    res.status(500).json({ error: message })
   }
 }

@@ -1,3 +1,6 @@
 {
-  "rewrites": [{ "source": "/api/(.*)", "destination": "/api/$1" }]
+  "rewrites": [{ "source": "/api/(.*)", "destination": "/api/$1" }],
+  "functions": {
+    "api/itinerary.ts": { "maxDuration": 60 }
+  }
 }
