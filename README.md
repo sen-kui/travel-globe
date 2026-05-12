@@ -2,6 +2,8 @@
 
 > 在一个可交互的 3D 地球上，找到你的下一个目的地，让 AI 为你规划专属旅行方案。
 
+**🔗 线上体验：[travel-globe-omega.vercel.app](https://travel-globe-omega.vercel.app)**
+
 ---
 
 ## ✨ 核心体验
@@ -57,7 +59,7 @@
 ### 1. 安装依赖
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/sen-kui/travel-globe.git
 cd travel-globe
 pnpm install
 ```
@@ -89,10 +91,15 @@ node_modules/.bin/vite
 
 ## 🌐 部署到 Vercel
 
-1. 将项目推送到 GitHub
-2. 在 Vercel 导入仓库
-3. 在 Dashboard → Settings → Environment Variables 添加上述环境变量
-4. 推送触发自动部署
+```bash
+# 安装 Vercel CLI（如未安装）
+npm i -g vercel
+
+# 登录并一键部署
+vercel --prod
+```
+
+或 Fork 本仓库后在 [vercel.com](https://vercel.com) 导入，在 Settings → Environment Variables 添加上述环境变量，推送即自动部署。
 
 `vercel.json` 已配置好 Serverless Function 路由，开箱即用。
 
